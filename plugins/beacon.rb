@@ -1,5 +1,3 @@
-require 'tempfile'
-
 module Msf
 class Plugin::Beacon < Msf::Plugin
 
@@ -92,17 +90,18 @@ class Plugin::Beacon < Msf::Plugin
         uuid = arg_to_uuid(args.shift)
         return unless uuid
 
+        period = args.shift.to_i
         if period < 30
           print_error("Minimum sleep time 30s")
           return
-        else
-          period = args.shift.to_i
         end
+
         print_status "Beaconing #{uuid} every #{period}s"
         @beacons[uuid] = period
         framework.sessions.each do |s|
           if Rex::Text.to_hex(s.last.core.uuid.puid, "") == uuid
             s.last.core.transport_sleep(period)
+            sleep 5
             s.last.kill
           end
         end
@@ -136,7 +135,5 @@ class Plugin::Beacon < Msf::Plugin
       'beacon'
     end
   end
-
 end
 end
-
