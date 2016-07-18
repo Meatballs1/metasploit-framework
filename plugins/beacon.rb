@@ -44,6 +44,7 @@ class Plugin::Beacon < Msf::Plugin
       beacon_info = @beacons[uuid]
       period = beacon_info[:period]
       if period
+        @beacons[uuid][:last_checkin] = DateTime.now
         Thread.new do
           # We run in a new thread to let the other session handlers
           # have a chance to initialize the UI and load stdapi etc.
@@ -102,9 +103,11 @@ class Plugin::Beacon < Msf::Plugin
         end
 
         print_status "Beaconing #{uuid} every #{period}s"
+        @beacons[uuid] = { period: period, commands: nil, last_checkin: "Unknown", next_checkin: "Unknown" }
         framework.sessions.each do |s|
           if Rex::Text.to_hex(s.last.core.uuid.puid, "") == uuid
-            @beacons[uuid] = { period: period, commands: nil, last_checkin: DateTime.now, next_checkin: (DateTime.now + period.seconds)}
+            @beacons[uuid][:last_checkin] = DateTime.now
+            @beacons[uuid][:next_checkin] = (DateTime.now + period.seconds)
             s.last.core.transport_sleep period
             sleep 5
             s.last.kill
@@ -147,6 +150,7 @@ class Plugin::Beacon < Msf::Plugin
     end
 
     def cmd_beacon_status
+      print_status "Current beacons:"
       @beacons.each do |k,v|
         print_line "Beacon #{k} - last checkin #{v[:last_checkin]} - next checkin #{v[:next_checkin]}"
       end
