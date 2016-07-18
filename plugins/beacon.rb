@@ -69,6 +69,8 @@ class Plugin::Beacon < Msf::Plugin
           print_status "Sleeping #{uuid} #{period}s"
           session.core.transport_sleep period
           sleep 5
+          session.shutdown_passive_dispatcher
+          sleep 5
           session.kill
         end
       end
@@ -109,6 +111,8 @@ class Plugin::Beacon < Msf::Plugin
             @beacons[uuid][:last_checkin] = DateTime.now
             @beacons[uuid][:next_checkin] = (DateTime.now + period.seconds)
             s.last.core.transport_sleep period
+            sleep 5
+            s.last.shutdown_passive_dispatcher
             sleep 5
             s.last.kill
           end
